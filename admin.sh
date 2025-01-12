@@ -131,7 +131,7 @@ update_hosts() {
     UPDATE_COMMANDS=$(cat <<EOF
 sudo apt update &&
 sudo apt upgrade -y &&
-sudo apt install -y proxmoxer python3-pip virt-viewer lightdm zenity lightdm-gtk-greeter dialog openssh sshpass python3-tk &&
+sudo apt install -y proxmoxer python3-pip virt-viewer lightdm zenity lightdm-gtk-greeter dialog  sshpass python3-tk &&
 sudo apt autoremove -y
 EOF
 )
