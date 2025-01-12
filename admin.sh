@@ -1,13 +1,51 @@
 #!/bin/bash
 
-# Ensure dialog is installed
-if ! command -v dialog &> /dev/null; then
-    echo "dialog could not be found. Please install it before running this script."
-    exit 1
-fi
+check_requirements() {
+    local missing=()
+
+    # Check for sshpass
+    if ! command -v sshpass &> /dev/null; then
+        missing+=("sshpass")
+    fi
+
+    # Check for dialog
+    if ! command -v dialog &> /dev/null; then
+        missing+=("dialog")
+    fi
+
+    # If any utilities are missing, prompt the user
+    if [ ${#missing[@]} -ne 0 ]; then
+        echo "The following required utilities are missing: ${missing[*]}"
+        read -p "Would you like to install them now? (y/n): " choice
+        case "$choice" in
+            y|Y )
+                for pkg in "${missing[@]}"; do
+                    if command -v apt-get &> /dev/null; then
+                        sudo apt-get install -y "$pkg"
+                    elif command -v yum &> /dev/null; then
+                        sudo yum install -y "$pkg"
+                    else
+                        echo "Unsupported package manager. Please install $pkg manually."
+                        exit 1
+                    fi
+                done
+                ;;
+            * )
+                echo "Please install the required utilities and rerun the script."
+                exit 1
+                ;;
+        esac
+    fi
+}
+
+# Call the check_requirements function at the start of the script
+check_requirements
 
 # Simple Login Menu
 login_menu() {
+    ENCRYPTION_PASSPHRASE=$(dialog --title "Encryption Passphrase" --passwordbox "Enter encryption passphrase:" 8 40 3>&1 1>&2 2>&3)
+    gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
+
     dialog --title "Login" --inputbox "Enter Username:" 8 40 2>username.txt
     dialog --title "Login" --passwordbox "Enter Password:" 8 40 2>password.txt
 
@@ -39,24 +77,23 @@ HOSTS_FILE="hosts.txt"
 # Function to add a host
 
 add_host() {
+    # Decrypt the file
+    gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
+
+    # Add a new host
     dialog --title "Add Host" --inputbox "Enter Hostname or IP:" 8 40 2>host.txt
     dialog --title "Add Host" --inputbox "Enter Username:" 8 40 2>username.txt
     dialog --title "Add Host" --inputbox "Enter SSH Key Path (optional):" 8 40 2>keypath.txt
     dialog --title "SSH Password" --passwordbox "Enter your SSH password (for remote host access):" 8 40 2>ssh_password.txt
     dialog --title "Sudo Password" --passwordbox "Enter your sudo password (for remote commands):" 8 40 2>sudo_password.txt
 
-
-  
-
-    
     HOSTNAME=$(<host.txt)
     USERNAME=$(<username.txt)
     KEYPATH=$(<keypath.txt)
     SSH_PASSWORD=$(<ssh_password.txt)
     SUDO_PASSWORD=$(<sudo_password.txt)
 
-
-    rm -f host.txt username.txt keypath.txt ssh_password.txtsudo_password.txt
+    rm -f host.txt username.txt keypath.txt ssh_password.txt sudo_password.txt
 
     if [ -z "$HOSTNAME" ] || [ -z "$USERNAME" ]; then
         dialog --title "Error" --msgbox "Hostname and Username are required!" 6 40
@@ -64,11 +101,19 @@ add_host() {
     fi
 
     echo "$HOSTNAME,$USERNAME,$KEYPATH,$SSH_PASSWORD,$SUDO_PASSWORD" >> hosts.txt
+
+    # Re-encrypt the file
+    gpg --quiet --batch --yes --symmetric --cipher-algo AES256 --passphrase "$ENCRYPTION_PASSPHRASE" hosts.txt
+    rm -f hosts.txt
+
     dialog --title "Success" --msgbox "Host added successfully!" 6 40
 }
 
+
 # Function to remove a host
 remove_host() {
+    gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
+
     if [ ! -f $HOSTS_FILE ] || [ ! -s $HOSTS_FILE ]; then
         dialog --title "Error" --msgbox "No hosts to remove!" 6 40
         return
@@ -83,6 +128,9 @@ remove_host() {
     fi
 }
 manage_power() {
+    
+    gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
+
     # Ensure the hosts file exists
     if [ ! -f "hosts.txt" ] || [ ! -s "hosts.txt" ]; then
         dialog --title "Error" --msgbox "No hosts found! Add hosts first." 6 40
@@ -105,36 +153,47 @@ manage_power() {
         return
     fi
 
-    # Prompt for shutdown or restart
-    ACTION=$(dialog --title "Shutdown or Restart" --menu "Choose an action:" 10 40 2 \
+    # Prompt for action
+    ACTION=$(dialog --title "Select Action" --menu "Choose an action:" 12 50 3 \
         "1" "Shutdown" \
         "2" "Restart" 2>&1 >/dev/tty)
 
-    if [ "$ACTION" == "1" ]; then
-        POWER_CMD="sudo shutdown now"
-    elif [ "$ACTION" == "2" ]; then
-        POWER_CMD="sudo reboot"
-    else
-        dialog --title "Error" --msgbox "Invalid action selected." 6 40
-        return
-    fi
+    case $ACTION in
+        1)
+            POWER_CMD="sudo shutdown now"
+            ;;
+        2)
+            POWER_CMD="sudo reboot"
+            ;;
+        3)
+            ;;
+        *)
+            dialog --title "Error" --msgbox "Invalid action selected." 6 40
+            return
+            ;;
+    esac
 
-    if [ "$SELECTED_HOST" == "ALL" ]; then
+    execute_remote_command "$SELECTED_HOST" "$POWER_CMD"
+}
+
+execute_remote_command() {
+    local host=$1
+    local command=$2
+
+    if [ "$host" == "ALL" ]; then
         # Process all hosts
-        exec 3< hosts.txt
-        while IFS=',' read -r HOSTNAME USERNAME KEYPATH SSH_PASSWORD SUDO_PASSWORD <&3; do
+        while IFS=',' read -r HOSTNAME USERNAME KEYPATH SSH_PASSWORD SUDO_PASSWORD; do
             dialog --title "Processing Host" --infobox "Performing action on $HOSTNAME..." 6 40
             if [[ -z "$KEYPATH" ]]; then
-                sshpass -p "$SSH_PASSWORD" ssh $USERNAME@$HOSTNAME "echo \"$SUDO_PASSWORD\" | sudo -S $POWER_CMD"
+                sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no $USERNAME@$HOSTNAME "echo \"$SUDO_PASSWORD\" | sudo -S bash -c '$command'"
             else
-                ssh -i "$KEYPATH" $USERNAME@$HOSTNAME "echo \"$SUDO_PASSWORD\" | sudo -S $POWER_CMD"
+                ssh -i "$KEYPATH" -o StrictHostKeyChecking=no $USERNAME@$HOSTNAME "echo \"$SUDO_PASSWORD\" | sudo -S bash -c '$command'"
             fi
-        done
-        exec 3<&-
+        done < hosts.txt
         dialog --title "Success" --msgbox "Action applied to all hosts!" 6 40
     else
         # Process a single host
-        HOST_DETAILS=$(grep "^$SELECTED_HOST," hosts.txt)
+        HOST_DETAILS=$(grep "^$host," hosts.txt)
         REMOTE_USERNAME=$(echo "$HOST_DETAILS" | cut -d ',' -f 2)
         KEYPATH=$(echo "$HOST_DETAILS" | cut -d ',' -f 3)
         SSH_PASSWORD=$(echo "$HOST_DETAILS" | cut -d ',' -f 4)
@@ -146,14 +205,30 @@ manage_power() {
         fi
 
         if [[ -z "$KEYPATH" ]]; then
-            sshpass -p "$SSH_PASSWORD" ssh $REMOTE_USERNAME@$SELECTED_HOST "echo \"$SUDO_PASSWORD\" | sudo -S $POWER_CMD"
+            sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no $REMOTE_USERNAME@$host "echo \"$SUDO_PASSWORD\" | sudo -S bash -c '$command'"
         else
-            ssh -i "$KEYPATH" $REMOTE_USERNAME@$SELECTED_HOST "echo \"$SUDO_PASSWORD\" | sudo -S $POWER_CMD"
+            ssh -i "$KEYPATH" -o StrictHostKeyChecking=no $REMOTE_USERNAME@$host "echo \"$SUDO_PASSWORD\" | sudo -S bash -c '$command'"
         fi
 
-        dialog --title "Success" --msgbox "Action applied to $SELECTED_HOST!" 6 40
+        dialog --title "Success" --msgbox "Action applied to $host!" 6 40
     fi
 }
+
+view_hosts() {
+    # Decrypt the file temporarily
+    gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
+
+    # Display only IP and username
+    awk -F',' '{print NR". " $1 " (" $2 ")"}' hosts.txt > view_hosts.txt
+    dialog --title "View Hosts" --textbox view_hosts.txt 15 50
+    rm -f view_hosts.txt hosts.txt
+
+     # Re-encrypt the file
+    gpg --quiet --batch --yes --symmetric --cipher-algo AES256 --passphrase "$ENCRYPTION_PASSPHRASE" hosts.txt
+    rm -f hosts.txt
+    rm -f modify_vdi.sh
+}
+
 
 # Function to manage hosts
 manage_hosts() {
@@ -175,11 +250,7 @@ manage_hosts() {
                 remove_host
                 ;;
             3)
-                if [ ! -f $HOSTS_FILE ] || [ ! -s $HOSTS_FILE ]; then
-                    dialog --title "View Hosts" --msgbox "No hosts available!" 6 40
-                else
-                    dialog --title "View Hosts" --textbox $HOSTS_FILE 15 50
-                fi
+                view_hosts
                 ;;
             4)
                 break
@@ -208,10 +279,15 @@ fi
 
 # Modify Client Configuration
 modify_client() {
+     # Decrypt the file
+    gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
+
     if [ ! -f "$HOSTS_FILE" ] || [ ! -s "$HOSTS_FILE" ]; then
         dialog --title "Error" --msgbox "No hosts found! Add hosts first." 6 40
         return
     fi
+    # Decrypt the file
+    gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
 
     # Parse hosts for selection
     HOSTS_MENU="ALL All_Hosts "
@@ -330,7 +406,11 @@ EOF
     fi
 
     # Cleanup
+     # Re-encrypt the file
+    gpg --quiet --batch --yes --symmetric --cipher-algo AES256 --passphrase "$ENCRYPTION_PASSPHRASE" hosts.txt
+    rm -f hosts.txt
     rm -f modify_vdi.sh
+
 }
 
 # VDI Management System Main Menu
@@ -384,6 +464,9 @@ while true; do
         dialog --title "Authentication Failed" --yesno "Would you like to retry?" 6 40
         if [[ $? -ne 0 ]]; then
             clear
+            # Re-encrypt the file
+            gpg --quiet --batch --yes --symmetric --cipher-algo AES256 --passphrase "$ENCRYPTION_PASSPHRASE" hosts.txt
+            rm -f hosts.txt
             exit 0
         fi
     fi
