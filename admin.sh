@@ -464,10 +464,10 @@ install_vdi_client() {
     sed -i "s/PLACEHOLDER_NETWORK_ADAPTER/$NETWORK_ADAPTER/g" "$TEMP_DIR/simple_setup.sh"
 
     # Transfer and run the script on the selected host(s)
-    INSTALL_COMMAND="sudo git clone -b $BRANCH $REPO_URL && cd simpledebianvdi && sudo chmod +x simple_setup.sh && sudo ./simple_setup.sh -i $PROXMOX_IP -t $VDI_TITLE -a $VDI_AUTH -n $NETWORK_ADAPTER"
-
+    INSTALL_COMMAND="sudo git clone -b $BRANCH $REPO_URL && cd simpledebianvdi && sudo chmod +x simple_setup.sh"
     dialog --title "Installing VDI Client" --infobox "Installing VDI Client on selected host(s)..." 6 50
     execute_remote_command "$SELECTED_HOST" "$INSTALL_COMMAND"
+    execute_remote_command "$SELECTED_HOST" "sudo ./simple_setup.sh -i $PROXMOX_IP -t $VDI_TITLE -a $VDI_AUTH -n $NETWORK_ADAPTER"
     
 
     # Cleanup
