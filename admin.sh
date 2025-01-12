@@ -109,6 +109,36 @@ add_host() {
     dialog --title "Success" --msgbox "Host added successfully!" 6 40
 }
 
+update_hosts() {
+    decrypt_hosts
+
+    # Parse hosts.txt to create a selection menu
+    HOSTS_MENU="ALL All_Hosts "
+    while IFS=',' read -r HOSTNAME USERNAME _; do
+        if [ -n "$HOSTNAME" ]; then
+            HOSTS_MENU+="$HOSTNAME $USERNAME "
+        fi
+    done < hosts.txt
+
+    # Select a host or all hosts
+    SELECTED_HOST=$(dialog --title "Update Hosts" --menu "Choose a host to update or select ALL:" 15 50 10 $HOSTS_MENU 2>&1 >/dev/tty)
+    if [ -z "$SELECTED_HOST" ]; then
+        dialog --title "Error" --msgbox "No host selected." 6 40
+        return
+    fi
+
+    # Define the update commands
+    UPDATE_COMMANDS=$(cat <<EOF
+sudo apt update &&
+sudo apt upgrade -y &&
+sudo apt install -y proxmoxer python3-pip virt-viewer lightdm zenity lightdm-gtk-greeter dialog openssh sshpass python3-tk &&
+sudo apt autoremove -y
+EOF
+)
+
+    # Execute the update commands on the selected host(s)
+    execute_remote_command "$SELECTED_HOST" "$UPDATE_COMMANDS"
+}
 
 # Function to remove a host
 remove_host() {
@@ -349,7 +379,11 @@ rm -f proxmox_ip.txt vdi_title.txt vdi_auth.txt
 # Execute the modification command
 execute_remote_command "$SELECTED_HOST" "$MODIFICATION_COMMAND"
 
-
+# Ask the user if they want to open the Power Management menu
+    dialog --title "Power Management" --yesno "Modification completed successfully! Would you like to open the Power Management menu?" 8 50
+    if [ $? -eq 0 ]; then
+        manage_power
+    fi
 
 # Cleanup
     # Re-encrypt the file
@@ -358,6 +392,88 @@ rm -f hosts.txt
 rm -f modify_vdi.sh
 
 }
+install_vdi_client() {
+    decrypt_hosts
+
+    # Prompt to add a new host or use an existing host
+    CHOICE=$(dialog --title "Install VDI Client" --menu "Choose an option:" 12 50 2 \
+        "1" "Add a New Host" \
+        "2" "Use an Existing Host" 3>&1 1>&2 2>&3)
+
+    if [ "$CHOICE" == "1" ]; then
+        add_host
+    fi
+
+    # Parse hosts.txt to create a selection menu
+    HOSTS_MENU="ALL All_Hosts "
+    while IFS=',' read -r HOSTNAME USERNAME _; do
+        if [ -n "$HOSTNAME" ]; then
+            HOSTS_MENU+="$HOSTNAME $USERNAME "
+        fi
+    done < hosts.txt
+
+    SELECTED_HOST=$(dialog --title "Select SSH Host" --menu "Choose a host to install VDI Client or select ALL:" 15 50 10 $HOSTS_MENU 2>&1 >/dev/tty)
+    if [ -z "$SELECTED_HOST" ]; then
+        dialog --title "Error" --msgbox "No host selected." 6 40
+        return
+    fi
+
+    # Gather required variables
+    dialog --title "Install VDI Client" --inputbox "Enter the Proxmox IP or DNS name:" 8 40 2>proxmox_ip.txt
+    dialog --title "Install VDI Client" --inputbox "Enter the Thin Client Title:" 8 40 2>vdi_title.txt
+
+    while true; do
+        VDI_AUTH=$(dialog --title "Install VDI Client" --menu "Select Authentication Type:" 12 40 2 \
+            "pve" "Proxmox VE Authentication" \
+            "pam" "Pluggable Authentication Module" 3>&1 1>&2 2>&3)
+        if [[ "$VDI_AUTH" == "pve" || "$VDI_AUTH" == "pam" ]]; then
+            break
+        else
+            dialog --title "Error" --msgbox "Invalid selection. Please choose 'pve' or 'pam'." 6 40
+        fi
+    done
+
+    dialog --title "Install VDI Client" --inputbox "Enter your Network Adapter (e.g., eth0, enp1s0):" 8 40 2>network_adapter.txt
+
+    PROXMOX_IP=$(<proxmox_ip.txt)
+    VDI_TITLE=$(<vdi_title.txt)
+    NETWORK_ADAPTER=$(<network_adapter.txt)
+    rm -f proxmox_ip.txt vdi_title.txt network_adapter.txt
+
+    # Confirm the collected variables
+    dialog --title "Confirm Installation Variables" --msgbox "Proxmox IP: $PROXMOX_IP\nThin Client Title: $VDI_TITLE\nAuth Type: $VDI_AUTH\nNetwork Adapter: $NETWORK_ADAPTER" 10 50
+
+    # Clone and prepare the repo locally
+    TEMP_DIR="/tmp/simpledebianvdi"
+    REPO_URL="https://github.com/JacksonBaer/simpledebianvdi.git"
+    BRANCH="cli"
+
+    dialog --title "Cloning Repository" --infobox "Cloning repository branch $BRANCH..." 6 50
+    rm -rf "$TEMP_DIR"
+    git clone -b "$BRANCH" "$REPO_URL" "$TEMP_DIR"
+
+    if [ $? -ne 0 ]; then
+        dialog --title "Error" --msgbox "Failed to clone repository. Check your internet connection." 6 50
+        return
+    fi
+
+    # Inject variables into the setup script
+    sed -i "s/PLACEHOLDER_PROXMOX_IP/$PROXMOX_IP/g" "$TEMP_DIR/simple_setup.sh"
+    sed -i "s/PLACEHOLDER_VDI_TITLE/$VDI_TITLE/g" "$TEMP_DIR/simple_setup.sh"
+    sed -i "s/PLACEHOLDER_AUTH_METHOD/$VDI_AUTH/g" "$TEMP_DIR/simple_setup.sh"
+    sed -i "s/PLACEHOLDER_NETWORK_ADAPTER/$NETWORK_ADAPTER/g" "$TEMP_DIR/simple_setup.sh"
+
+    # Transfer and run the script on the selected host(s)
+    INSTALL_COMMAND="sudo git clone -b $BRANCH $REPO_URL && cd simpledebianvdi && sudo chmod +x simple_setup.sh && sudo chmod +x modifyvdi.sh && sudo ./simple_setup.sh"
+
+    dialog --title "Installing VDI Client" --infobox "Installing VDI Client on selected host(s)..." 6 50
+    execute_remote_command "$SELECTED_HOST" "$INSTALL_COMMAND"
+
+    # Cleanup
+    rm -rf "$TEMP_DIR"
+    dialog --title "Installation Complete" --msgbox "VDI Client installation completed successfully!" 8 50
+}
+
 
 # VDI Management System Main Menu
 main_menu() { 
@@ -375,10 +491,10 @@ main_menu() {
 
         case $OPTION in
             1)
-                dialog --title "Update" --msgbox "Performing update..." 6 40
+                update_hosts                
                 ;;
             2)
-                dialog --title "Install" --msgbox "Installing software..." 6 40
+                install_vdi_client        
                 ;;
             3)
                 modify_client
