@@ -129,13 +129,10 @@ remove_host() {
 }
 manage_power() {
     
+    decrypt_hosts
+    
+     # Decrypt the file temporarily
     gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
-
-    # Ensure the hosts file exists
-    if [ ! -f "hosts.txt" ] || [ ! -s "hosts.txt" ]; then
-        dialog --title "Error" --msgbox "No hosts found! Add hosts first." 6 40
-        return
-    fi
 
     # Parse hosts.txt to create a selection menu
     HOSTS_MENU="ALL All_Hosts "
@@ -146,8 +143,7 @@ manage_power() {
     done < hosts.txt
 
     # Present the menu
-    SELECTED_HOST=$(dialog --title "Select SSH Host" --menu "Choose a host to manage power or select ALL for all hosts:" 15 50 10 $HOSTS_MENU 2>&1 >/dev/tty)
-
+    SELECTED_HOST=$(dialog --title "Power Management" --menu "Choose a host or select ALL:" 15 50 10 $HOSTS_MENU 2>&1 >/dev/tty)
     if [ -z "$SELECTED_HOST" ]; then
         dialog --title "Error" --msgbox "No host selected." 6 40
         return
@@ -156,25 +152,25 @@ manage_power() {
     # Prompt for action
     ACTION=$(dialog --title "Select Action" --menu "Choose an action:" 12 50 3 \
         "1" "Shutdown" \
-        "2" "Restart" 2>&1 >/dev/tty)
+        "2" "Restart" \
+        "3" "Restart thinclient Script" 2>&1 >/dev/tty)
 
     case $ACTION in
         1)
-            POWER_CMD="sudo shutdown now"
+            execute_remote_command "$SELECTED_HOST" "sudo shutdown now"
             ;;
         2)
-            POWER_CMD="sudo reboot"
+            execute_remote_command "$SELECTED_HOST" "sudo reboot"
             ;;
         3)
+            execute_remote_command "$SELECTED_HOST" "sudo pkill -f thinclient; sleep 3; nohup thinclient &"
             ;;
         *)
             dialog --title "Error" --msgbox "Invalid action selected." 6 40
-            return
             ;;
     esac
-
-    execute_remote_command "$SELECTED_HOST" "$POWER_CMD"
 }
+
 
 execute_remote_command() {
     local host=$1
@@ -213,7 +209,11 @@ execute_remote_command() {
         dialog --title "Success" --msgbox "Action applied to $host!" 6 40
     fi
 }
+decrypt_hosts() {
+    # Decrypt the file temporarily
+    gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
 
+}
 view_hosts() {
     # Decrypt the file temporarily
     gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
@@ -279,25 +279,18 @@ fi
 
 # Modify Client Configuration
 modify_client() {
-     # Decrypt the file
-    gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
+    decrypt_hosts
 
-    if [ ! -f "$HOSTS_FILE" ] || [ ! -s "$HOSTS_FILE" ]; then
-        dialog --title "Error" --msgbox "No hosts found! Add hosts first." 6 40
-        return
-    fi
-    # Decrypt the file
-    gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
-
-    # Parse hosts for selection
+    # Parse hosts.txt to create a selection menu
     HOSTS_MENU="ALL All_Hosts "
     while IFS=',' read -r HOSTNAME USERNAME _; do
         if [ -n "$HOSTNAME" ]; then
             HOSTS_MENU+="$HOSTNAME $USERNAME "
         fi
-    done < $HOSTS_FILE
+    done < hosts.txt
 
-    SELECTED_HOST=$(dialog --title "Select SSH Host" --menu "Choose a client to modify or select ALL:" 15 50 10 $HOSTS_MENU 2>&1 >/dev/tty)
+    # Select a host or all hosts
+    SELECTED_HOST=$(dialog --title "Modify Thin Client" --menu "Choose a client to modify or select ALL:" 15 50 10 $HOSTS_MENU 2>&1 >/dev/tty)
     if [ -z "$SELECTED_HOST" ]; then
         dialog --title "Error" --msgbox "No host selected." 6 40
         return
@@ -335,81 +328,34 @@ modify_client() {
         return
     fi
 
-    # Read user inputs
-    PROXMOX_IP=$(<proxmox_ip.txt)
-    VDI_TITLE=$(<vdi_title.txt)
-    VDI_AUTH=$(<vdi_auth.txt)
-    rm -f proxmox_ip.txt vdi_title.txt vdi_auth.txt
-
-    if [[ -z "$PROXMOX_IP" || -z "$VDI_TITLE" || -z "$VDI_AUTH" ]]; then
-        dialog --title "Error" --msgbox "All fields are required!" 6 40
-        return
-    fi
-
-    # Generate the modification script
-    cat > ./modify_vdi.sh <<EOF
-#!/bin/bash
+    # Build the modification script
+    MODIFICATION_COMMAND=$(cat <<EOF
 sudo mkdir -p /etc/vdiclient
 sudo tee /etc/vdiclient/vdiclient.ini > /dev/null <<EOL
 [General]
-title = $VDI_TITLE
+title = $(<vdi_title.txt)
 theme = $VDI_THEME
 [Authentication]
-auth_backend = $VDI_AUTH
+auth_backend = $(<vdi_auth.txt)
+tls_verify = false
 [Hosts]
-$PROXMOX_IP=8006
+$(<proxmox_ip.txt)=8006
 EOL
 EOF
+)
+
+rm -f proxmox_ip.txt vdi_title.txt vdi_auth.txt
+
+# Execute the modification command
+execute_remote_command "$SELECTED_HOST" "$MODIFICATION_COMMAND"
 
 
 
-
-
-
-    if [ "$SELECTED_HOST" == "ALL" ]; then
-        # Process all hosts
-        exec 3< hosts.txt  # Open hosts.txt for reading using file descriptor 3
-        while IFS=',' read -r HOSTNAME USERNAME KEYPATH SSH_PASSWORD SUDO_PASSWORD <&3; do
-            dialog --title "Processing Host" --infobox "Processing $HOSTNAME..." 6 40
-            if [[ -z "$KEYPATH" ]]; then
-                sshpass -p "$SSH_PASSWORD" scp ./modify_vdi.sh $USERNAME@$HOSTNAME:~/
-                sshpass -p "$SSH_PASSWORD" ssh $USERNAME@$HOSTNAME "chmod +x modify_vdi.sh && echo \"$SUDO_PASSWORD\" | sudo -S ./modify_vdi.sh && rm -f modify_vdi.sh"
-            else
-                scp -i "$KEYPATH" ./modify_vdi.sh $USERNAME@$HOSTNAME:~/
-                ssh -i "$KEYPATH" $USERNAME@$HOSTNAME "chmod +x modify_vdi.sh && echo \"$SUDO_PASSWORD\" | sudo -S ./modify_vdi.sh && rm -f modify_vdi.sh"
-            fi
-        done
-        exec 3<&-  # Close file descriptor 3
-        dialog --title "Success" --msgbox "Configuration applied to all hosts!" 6 40
-    else
-        # Process a single host
-        HOST_DETAILS=$(grep "^$SELECTED_HOST," hosts.txt)
-        REMOTE_USERNAME=$(echo "$HOST_DETAILS" | cut -d ',' -f 2)
-        KEYPATH=$(echo "$HOST_DETAILS" | cut -d ',' -f 3)
-        SSH_PASSWORD=$(echo "$HOST_DETAILS" | cut -d ',' -f 4)
-        SUDO_PASSWORD=$(echo "$HOST_DETAILS" | cut -d ',' -f 5)
-
-        if [[ -z "$REMOTE_USERNAME" || -z "$SSH_PASSWORD" || -z "$SUDO_PASSWORD" ]]; then
-            dialog --title "Error" --msgbox "Host details are incomplete. Please re-add the host." 6 40
-            return
-        fi
-
-        if [[ -z "$KEYPATH" ]]; then
-            sshpass -p "$SSH_PASSWORD" scp ./modify_vdi.sh $REMOTE_USERNAME@$SELECTED_HOST:~/
-            sshpass -p "$SSH_PASSWORD" ssh $REMOTE_USERNAME@$SELECTED_HOST "chmod +x modify_vdi.sh && echo \"$SUDO_PASSWORD\" | sudo -S ./modify_vdi.sh && rm -f modify_vdi.sh"
-        else
-            scp -i "$KEYPATH" ./modify_vdi.sh $REMOTE_USERNAME@$SELECTED_HOST:~/
-            ssh -i "$KEYPATH" $REMOTE_USERNAME@$SELECTED_HOST "chmod +x modify_vdi.sh && echo \"$SUDO_PASSWORD\" | sudo -S ./modify_vdi.sh && rm -f modify_vdi.sh"
-        fi
-
-        dialog --title "Success" --msgbox "Configuration applied to $SELECTED_HOST!" 6 40
-    fi
-
-    # Cleanup
-     # Re-encrypt the file
-    gpg --quiet --batch --yes --symmetric --cipher-algo AES256 --passphrase "$ENCRYPTION_PASSPHRASE" hosts.txt
-    rm -f hosts.txt
-    rm -f modify_vdi.sh
+# Cleanup
+    # Re-encrypt the file
+gpg --quiet --batch --yes --symmetric --cipher-algo AES256 --passphrase "$ENCRYPTION_PASSPHRASE" hosts.txt
+rm -f hosts.txt
+rm -f modify_vdi.sh
 
 }
 
