@@ -383,7 +383,17 @@ EOF
 rm -f proxmox_ip.txt vdi_title.txt vdi_auth.txt
 
 # Execute the modification command
-execute_remote_command "$SELECTED_HOST" "$MODIFICATION_COMMAND"
+if [ "$SELECTED_HOST" == "ALL" ]; then
+    # Loop over all hosts in hosts.txt and execute the command on each
+    while IFS=',' read -r HOSTNAME USERNAME _; do
+        if [ -n "$HOSTNAME" ]; then
+            execute_remote_command "$HOSTNAME" "$MODIFICATION_COMMAND"
+        fi
+    done < hosts.txt
+else
+    # Execute on the selected host
+    execute_remote_command "$SELECTED_HOST" "$MODIFICATION_COMMAND"
+fi
 
 # Ask the user if they want to open the Power Management menu
     dialog --title "Power Management" --yesno "Modification completed successfully! Would you like to open the Power Management menu?" 8 50
@@ -396,8 +406,8 @@ execute_remote_command "$SELECTED_HOST" "$MODIFICATION_COMMAND"
 gpg --quiet --batch --yes --symmetric --cipher-algo AES256 --passphrase "$ENCRYPTION_PASSPHRASE" hosts.txt
 rm -f hosts.txt
 rm -f modify_vdi.sh
-
 }
+
 install_vdi_client() {
     decrypt_hosts
 
