@@ -416,20 +416,20 @@ install_vdi_client() {
         "1" "Add a New Host" \
         "2" "Use an Existing Host" 3>&1 1>&2 2>&3)
 
-    if [ "$CHOICE" == "1" ];then
+    if [ "$CHOICE" == "1" ]; then
         add_host
     fi
 
     # Parse hosts.txt to create a selection menu
     HOSTS_MENU="ALL All_Hosts "
     while IFS=',' read -r HOSTNAME USERNAME _; do
-        if [ -n "$HOSTNAME" ];then
+        if [ -n "$HOSTNAME" ]; then
             HOSTS_MENU+="$HOSTNAME $USERNAME "
         fi
     done < hosts.txt
 
     SELECTED_HOST=$(dialog --title "Select SSH Host" --menu "Choose a host to install VDI Client or select ALL:" 15 50 10 $HOSTS_MENU 2>&1 >/dev/tty)
-    if [ -z "$SELECTED_HOST" ];then
+    if [ -z "$SELECTED_HOST" ]; then
         dialog --title "Error" --msgbox "No host selected." 6 40
         return
     fi
@@ -468,7 +468,7 @@ install_vdi_client() {
     rm -rf "$TEMP_DIR"
     git clone -b "$BRANCH" "$REPO_URL" "$TEMP_DIR"
 
-    if [ $? -ne 0 ];then
+    if [ $? -ne 0 ]; then
         dialog --title "Error" --msgbox "Failed to clone repository. Check your internet connection." 6 50
         return
     fi
@@ -476,20 +476,31 @@ install_vdi_client() {
     # Define commands
     INSTALL_COMMAND="sudo git clone -b $BRANCH $REPO_URL && cd simpledebianvdi && sudo chmod +x simple_setup.sh && sudo ./simple_setup.sh -i $PROXMOX_IP -t '$VDI_TITLE' -a $VDI_AUTH -n $NETWORK_ADAPTER"
     AUTOSTART_COMMAND="sudo mkdir -p /home/vdiuser/.config/lxsession/LXDE && echo '@/usr/bin/bash /home/vdiuser/thinclient' | sudo tee /home/vdiuser/.config/lxsession/LXDE/autostart"
-    
+    REBOOT_COMMAND="sudo reboot"
+
     # Execute the install command
     dialog --title "Installing VDI Client" --infobox "Installing VDI Client on selected host(s)..." 6 50
-    execute_remote_command "$SELECTED_HOST" "$INSTALL_COMMAND"
-
-    # Configure autostart
-    dialog --title "Configuring Autostart" --infobox "Setting up autostart on selected host(s)..." 6 50
-    execute_remote_command "$SELECTED_HOST" "$AUTOSTART_COMMAND"
-    execute_remote_command "$SELECTED_HOST" "$sudo reboot"
+    if [ "$SELECTED_HOST" == "ALL" ]; then
+        # Loop over all hosts in hosts.txt and execute the commands for each
+        while IFS=',' read -r HOSTNAME USERNAME _; do
+            if [ -n "$HOSTNAME" ]; then
+                execute_remote_command "$HOSTNAME" "$INSTALL_COMMAND"
+                execute_remote_command "$HOSTNAME" "$AUTOSTART_COMMAND"
+                execute_remote_command "$HOSTNAME" "$REBOOT_COMMAND"
+            fi
+        done < hosts.txt
+    else
+        # Execute on the selected host
+        execute_remote_command "$SELECTED_HOST" "$INSTALL_COMMAND"
+        execute_remote_command "$SELECTED_HOST" "$AUTOSTART_COMMAND"
+        execute_remote_command "$SELECTED_HOST" "$REBOOT_COMMAND"
+    fi
 
     # Cleanup
     rm -rf "$TEMP_DIR"
     dialog --title "Installation Complete" --msgbox "VDI Client installation and autostart configuration completed successfully!" 8 50
 }
+
 
 
 
