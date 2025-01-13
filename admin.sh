@@ -536,6 +536,10 @@ main_menu() {
                 ;;
             6)
                 dialog --title "Exit" --msgbox "Exiting system. Goodbye!" 6 40
+                # Re-encrypt the file
+                gpg --quiet --batch --yes --symmetric --cipher-algo AES256 --passphrase "$ENCRYPTION_PASSPHRASE" hosts.txt
+                rm -f hosts.txt
+                exit 0
                 clear
                 exit 0
                 ;;
