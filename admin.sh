@@ -459,7 +459,7 @@ install_vdi_client() {
 
     # Define commands
     INSTALL_COMMAND="sudo git clone -b $BRANCH $REPO_URL && cd simpledebianvdi && sudo chmod +x simple_setup.sh && sudo ./simple_setup.sh -i $PROXMOX_IP -t '$VDI_TITLE' -a $VDI_AUTH -n $NETWORK_ADAPTER"
-    AUTOSTART_COMMAND="mkdir -p /home/vdiuser/.config/lxsession/LXDE && echo '@/usr/bin/bash /home/vdiuser/thinclient' > /home/vdiuser/.config/lxsession/LXDE/autostart"
+    AUTOSTART_COMMAND="sudo mkdir -p /home/vdiuser/.config/lxsession/LXDE && echo '@/usr/bin/bash /home/vdiuser/thinclient' | sudo tee /home/vdiuser/.config/lxsession/LXDE/autostart"
 
     # Execute the install command
     dialog --title "Installing VDI Client" --infobox "Installing VDI Client on selected host(s)..." 6 50
