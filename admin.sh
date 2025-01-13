@@ -468,7 +468,7 @@ install_vdi_client() {
     dialog --title "Installing VDI Client" --infobox "Installing VDI Client on selected host(s)..." 6 50
     execute_remote_command "$SELECTED_HOST" "$INSTALL_COMMAND"
     execute_remote_command "$SELECTED_HOST" "sudo /home/vdiuser/simpledebianvdi/simple_setup.sh -i $PROXMOX_IP -t $VDI_TITLE -a $VDI_AUTH -n $NETWORK_ADAPTER"
-    execute_remote_command "$SELECTED_HOST" "echo "@/usr/bin/bash /home/vdiuser/thinclient" > ~/.config/lxsession/LXDE/autostart"
+    execute_remote_command "$SELECTED_HOST" '"echo "@/usr/bin/bash /home/vdiuser/thinclient" > ~/.config/lxsession/LXDE/autostart"'
     
 
     # Cleanup
