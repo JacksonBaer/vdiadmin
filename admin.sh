@@ -205,7 +205,7 @@ manage_power() {
 execute_remote_command() {
     local host=$1
     local command=$2
-
+    decrypt_hosts
     if [ "$host" == "ALL" ]; then
         # Process all hosts
         while IFS=',' read -r HOSTNAME USERNAME KEYPATH SSH_PASSWORD SUDO_PASSWORD; do
@@ -214,6 +214,11 @@ execute_remote_command() {
                 sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=no $USERNAME@$HOSTNAME "echo \"$SUDO_PASSWORD\" | sudo -S bash -c '$command'"
             else
                 ssh -i "$KEYPATH" -o StrictHostKeyChecking=no $USERNAME@$HOSTNAME "echo \"$SUDO_PASSWORD\" | sudo -S bash -c '$command'"
+            fi
+
+            # Check if the command executed successfully
+            if [ $? -ne 0 ]; then
+                dialog --title "Error" --msgbox "Failed to execute command on $HOSTNAME." 6 40
             fi
         done < hosts.txt
         dialog --title "Success" --msgbox "Action applied to all hosts!" 6 40
@@ -239,6 +244,7 @@ execute_remote_command() {
         dialog --title "Success" --msgbox "Action applied to $host!" 6 40
     fi
 }
+
 decrypt_hosts() {
     # Decrypt the file temporarily
     gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
@@ -460,7 +466,7 @@ install_vdi_client() {
     # Define commands
     INSTALL_COMMAND="sudo git clone -b $BRANCH $REPO_URL && cd simpledebianvdi && sudo chmod +x simple_setup.sh && sudo ./simple_setup.sh -i $PROXMOX_IP -t '$VDI_TITLE' -a $VDI_AUTH -n $NETWORK_ADAPTER"
     AUTOSTART_COMMAND="sudo mkdir -p /home/vdiuser/.config/lxsession/LXDE && echo '@/usr/bin/bash /home/vdiuser/thinclient' | sudo tee /home/vdiuser/.config/lxsession/LXDE/autostart"
-
+    
     # Execute the install command
     dialog --title "Installing VDI Client" --infobox "Installing VDI Client on selected host(s)..." 6 50
     execute_remote_command "$SELECTED_HOST" "$INSTALL_COMMAND"
@@ -468,6 +474,7 @@ install_vdi_client() {
     # Configure autostart
     dialog --title "Configuring Autostart" --infobox "Setting up autostart on selected host(s)..." 6 50
     execute_remote_command "$SELECTED_HOST" "$AUTOSTART_COMMAND"
+    execute_remote_command "$SELECTED_HOST" "$sudo reboot"
 
     # Cleanup
     rm -rf "$TEMP_DIR"
