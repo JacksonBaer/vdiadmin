@@ -1,0 +1,8 @@
+export ENCRYPTION_PASSPHRASE="encpass"
+
+add vdiuser to the sudo file
+install open-ssh
+
+    gpg --quiet --batch --yes --symmetric --cipher-algo AES256 --passphrase "$ENCRYPTION_PASSPHRASE" "credentials.txt"
+
+mkdir -p /home/vdiuser/.config/lxsession/LXDE && echo "@/usr/bin/bash /home/vdiuser/admin.start" > /home/vdiuser/.config/lxsession/LXDE/autostart

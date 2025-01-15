@@ -42,26 +42,73 @@ check_requirements() {
 check_requirements
 
 # Simple Login Menu
-login_menu() {
-    ENCRYPTION_PASSPHRASE=$(dialog --title "Encryption Passphrase" --passwordbox "Enter encryption passphrase:" 8 40 3>&1 1>&2 2>&3)
-    gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
+# login_menu() {
+#     ENCRYPTION_PASSPHRASE=$(dialog --title "Encryption Passphrase" --passwordbox "Enter encryption passphrase:" 8 40 3>&1 1>&2 2>&3)
+#     gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
 
+#     dialog --title "Login" --inputbox "Enter Username:" 8 40 2>username.txt
+#     dialog --title "Login" --passwordbox "Enter Password:" 8 40 2>password.txt
+
+#     USERNAME=$(<username.txt)
+#     PASSWORD=$(<password.txt)
+
+#     # Simulated authentication (replace with real logic)
+#     if [[ "$USERNAME" == "admin" && "$PASSWORD" == "password" ]]; then
+#         rm -f username.txt password.txt
+#         return 0
+#     else
+#         rm -f username.txt password.txt
+#         dialog --title "Error" --msgbox "Invalid credentials!" 6 40
+#         return 1
+#     fi
+# }
+
+login_menu() {
+    CREDENTIALS_FILE="credentials.txt"
+    ENCRYPTED_FILE="credentials.txt.gpg"
+
+    # Prompt for encryption passphrase
+    ENCRYPTION_PASSPHRASE=$(dialog --title "Encryption Passphrase" --passwordbox "Enter encryption passphrase:" 8 40 3>&1 1>&2 2>&3)
+
+    # Decrypt the credentials file
+    gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output "$CREDENTIALS_FILE" "$ENCRYPTED_FILE"
+    if [ $? -ne 0 ]; then
+        dialog --title "Error" --msgbox "Failed to decrypt credentials file. Please check your passphrase." 6 50
+        return 1
+    fi
+
+    # Prompt for username and password
     dialog --title "Login" --inputbox "Enter Username:" 8 40 2>username.txt
     dialog --title "Login" --passwordbox "Enter Password:" 8 40 2>password.txt
 
     USERNAME=$(<username.txt)
     PASSWORD=$(<password.txt)
 
-    # Simulated authentication (replace with real logic)
-    if [[ "$USERNAME" == "admin" && "$PASSWORD" == "password" ]]; then
-        rm -f username.txt password.txt
+    rm -f username.txt password.txt
+
+    # Validate credentials
+    AUTHENTICATED=0
+    while IFS=: read -r FILE_USERNAME FILE_PASSWORD; do
+        if [[ "$USERNAME" == "$FILE_USERNAME" && "$PASSWORD" == "$FILE_PASSWORD" ]]; then
+            AUTHENTICATED=1
+            break
+        fi
+    done < "$CREDENTIALS_FILE"
+
+    # Re-encrypt the credentials file
+    gpg --quiet --batch --yes --symmetric --cipher-algo AES256 --passphrase "$ENCRYPTION_PASSPHRASE" "$CREDENTIALS_FILE"
+    rm -f "$CREDENTIALS_FILE"
+
+    # Check authentication result
+    if [ "$AUTHENTICATED" -eq 1 ]; then
+        dialog --title "Login Successful" --msgbox "Welcome, $USERNAME!" 6 40
         return 0
     else
-        rm -f username.txt password.txt
         dialog --title "Error" --msgbox "Invalid credentials!" 6 40
         return 1
     fi
 }
+
 
 #!/bin/bash
 
@@ -142,7 +189,7 @@ EOF
 
 # Function to remove a host
 remove_host() {
-    gpg --quiet --batch --yes --decrypt --passphrase "$ENCRYPTION_PASSPHRASE" --output hosts.txt hosts.txt.gpg
+    decrypt_hosts
 
     if [ ! -f $HOSTS_FILE ] || [ ! -s $HOSTS_FILE ]; then
         dialog --title "Error" --msgbox "No hosts to remove!" 6 40
@@ -193,7 +240,7 @@ manage_power() {
             execute_remote_command "$SELECTED_HOST" "sudo reboot"
             ;;
         3)
-            execute_remote_command "$SELECTED_HOST" "sudo pkill -f thinclient; sleep 3; nohup thinclient &"
+            execute_remote_command "$SELECTED_HOST" "sudo pkill -f thinclient; sleep 3; nohup thinclient"
             ;;
         *)
             dialog --title "Error" --msgbox "Invalid action selected." 6 40
@@ -403,9 +450,9 @@ fi
 
 # Cleanup
     # Re-encrypt the file
-gpg --quiet --batch --yes --symmetric --cipher-algo AES256 --passphrase "$ENCRYPTION_PASSPHRASE" hosts.txt
-rm -f hosts.txt
-rm -f modify_vdi.sh
+    gpg --quiet --batch --yes --symmetric --cipher-algo AES256 --passphrase "$ENCRYPTION_PASSPHRASE" hosts.txt
+    rm -f hosts.txt
+    rm -f modify_vdi.sh
 }
 
 install_vdi_client() {
@@ -539,7 +586,6 @@ main_menu() {
                 # Re-encrypt the file
                 gpg --quiet --batch --yes --symmetric --cipher-algo AES256 --passphrase "$ENCRYPTION_PASSPHRASE" hosts.txt
                 rm -f hosts.txt
-                exit 0
                 clear
                 exit 0
                 ;;
