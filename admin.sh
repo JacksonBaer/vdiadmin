@@ -190,6 +190,82 @@ manage_power() {
         dialog --title "Success" --msgbox "Action applied to $SELECTED_HOST!" 6 40
     fi
 }
+
+lockdown_mode() {
+
+    
+    # Parse hosts.txt to create a selection menu
+    HOSTS_MENU="ALL All_Hosts "
+    while IFS=',' read -r HOSTNAME USERNAME KEYPATH SSH_PASSWORD SUDO_PASSWORD; do
+        if [ -n "$HOSTNAME" ]; then
+            HOSTS_MENU+="$HOSTNAME $USERNAME "
+        fi
+    done < hosts.txt
+
+    # Present the menu
+    SELECTED_HOST=$(dialog --title "Select SSH Host" --menu "Choose a host to apply lockdown mode:" 15 50 10 $HOSTS_MENU 2>&1 >/dev/tty)
+
+    if [ -z "$SELECTED_HOST" ]; then
+        dialog --title "Error" --msgbox "No host selected." 6 40
+        return
+    fi
+    
+    # Choose action: Lockdown or Reopen Terminal
+    ACTION=$(dialog --title "Lockdown Mode" --menu "Select an action:" 10 40 2 \
+        "1" "Lockdown System" \
+        "2" "Reopen Terminal" 2>&1 >/dev/tty)
+    
+    if [ "$ACTION" == "1" ]; then
+        STATUS_MSG="Lockdown"
+    elif [ "$ACTION" == "2" ]; then
+        STATUS_MSG="System Online"
+    else
+        dialog --title "Error" --msgbox "Invalid action selected." 6 40
+        return
+    fi
+    
+    # Check current status and apply action
+    if [ "$SELECTED_HOST" == "ALL" ]; then
+        exec 3< hosts.txt
+        while IFS=',' read -r HOSTNAME USERNAME KEYPATH SSH_PASSWORD SUDO_PASSWORD <&3; do
+            dialog --title "Processing Host" --infobox "Applying action on $HOSTNAME..." 6 40
+            if [[ -z "$KEYPATH" ]]; then
+                sshpass -p "$SSH_PASSWORD" ssh $USERNAME@$HOSTNAME "echo '$STATUS_MSG' > status"
+                sshpass -p "$SSH_PASSWORD" ssh $USERNAME@$HOSTNAME "pkill -f python"
+            else
+                ssh -i "$KEYPATH" $USERNAME@$HOSTNAME "echo '$STATUS_MSG' > status"
+                ssh -i "$KEYPATH" $USERNAME@$HOSTNAME "pkill -f python"
+            fi
+        done
+        exec 3<&-
+        dialog --title "Success" --msgbox "Action applied to all hosts!" 6 40
+    else
+        HOST_DETAILS=$(grep "^$SELECTED_HOST," hosts.txt)
+        REMOTE_USERNAME=$(echo "$HOST_DETAILS" | cut -d ',' -f 2)
+        KEYPATH=$(echo "$HOST_DETAILS" | cut -d ',' -f 3)
+        SSH_PASSWORD=$(echo "$HOST_DETAILS" | cut -d ',' -f 4)
+        SUDO_PASSWORD=$(echo "$HOST_DETAILS" | cut -d ',' -f 5)
+
+        if [[ -z "$REMOTE_USERNAME" || -z "$SSH_PASSWORD" || -z "$SUDO_PASSWORD" ]]; then
+            dialog --title "Error" --msgbox "Host details are incomplete. Please re-add the host." 6 40
+            return
+        fi
+
+        if [[ -z "$KEYPATH" ]]; then
+            sshpass -p "$SSH_PASSWORD" ssh $REMOTE_USERNAME@$SELECTED_HOST "echo '$STATUS_MSG' > status"
+            sshpass -p "$SSH_PASSWORD" ssh $REMOTE_USERNAME@$SELECTED_HOST "pkill -f python"
+        else
+            ssh -i "$KEYPATH" $REMOTE_USERNAME@$SELECTED_HOST "echo '$STATUS_MSG' > status"
+            ssh -i "$KEYPATH" $REMOTE_USERNAME@$SELECTED_HOST "pkill -f python"
+        fi
+
+        dialog --title "Success" --msgbox "Action applied to $SELECTED_HOST!" 6 40
+    fi
+}
+
+
+
+
 update_hosts() {
     
 
@@ -395,10 +471,10 @@ EOF
             dialog --title "Processing Host" --infobox "Processing $HOSTNAME..." 6 40
             if [[ -z "$KEYPATH" ]]; then
                 sshpass -p "$SSH_PASSWORD" scp ./modify_vdi.sh $USERNAME@$HOSTNAME:~/
-                sshpass -p "$SSH_PASSWORD" ssh $USERNAME@$HOSTNAME "chmod +x modify_vdi.sh && echo \"$SUDO_PASSWORD\" | sudo -S ./modify_vdi.sh && rm -f modify_vdi.sh"
+                sshpass -p "$SSH_PASSWORD" ssh $USERNAME@$HOSTNAME "chmod +x modify_vdi.sh && echo \"$SUDO_PASSWORD\" | sudo -S ./modify_vdi.sh && rm -f modify_vdi.sh && pkill -f python"
             else
                 scp -i "$KEYPATH" ./modify_vdi.sh $USERNAME@$HOSTNAME:~/
-                ssh -i "$KEYPATH" $USERNAME@$HOSTNAME "chmod +x modify_vdi.sh && echo \"$SUDO_PASSWORD\" | sudo -S ./modify_vdi.sh && rm -f modify_vdi.sh"
+                ssh -i "$KEYPATH" $USERNAME@$HOSTNAME "chmod +x modify_vdi.sh && echo \"$SUDO_PASSWORD\" | sudo -S ./modify_vdi.sh && rm -f modify_vdi.sh && pkill -f python"
             fi
         done
         exec 3<&-  # Close file descriptor 3
@@ -427,23 +503,23 @@ EOF
         dialog --title "Success" --msgbox "Configuration applied to $SELECTED_HOST!" 6 40
     fi
 
-        # After the installation or updates are done
-    if [ "$SELECTED_HOST" == "ALL" ]; then
-        exec 3< hosts.txt
-        while IFS=',' read -r HOSTNAME USERNAME KEYPATH SSH_PASSWORD SUDO_PASSWORD <&3; do
-            dialog --title "Processing Host" --infobox "Prompting restart on $HOSTNAME..." 6 40
-            prompt_restart_vdi "$HOSTNAME" "$USERNAME" "$KEYPATH" "$SSH_PASSWORD" "$SUDO_PASSWORD"
-        done
-        exec 3<&-
-    else
-        HOST_DETAILS=$(grep "^$SELECTED_HOST," hosts.txt)
-        REMOTE_USERNAME=$(echo "$HOST_DETAILS" | cut -d ',' -f 2)
-        KEYPATH=$(echo "$HOST_DETAILS" | cut -d ',' -f 3)
-        SSH_PASSWORD=$(echo "$HOST_DETAILS" | cut -d ',' -f 4)
-        SUDO_PASSWORD=$(echo "$HOST_DETAILS" | cut -d ',' -f 5)
+    #     # After the installation or updates are done
+    # if [ "$SELECTED_HOST" == "ALL" ]; then
+    #     exec 3< hosts.txt
+    #     while IFS=',' read -r HOSTNAME USERNAME KEYPATH SSH_PASSWORD SUDO_PASSWORD <&3; do
+    #         dialog --title "Processing Host" --infobox "Prompting restart on $HOSTNAME..." 6 40
+    #         prompt_restart_vdi "$HOSTNAME" "$USERNAME" "$KEYPATH" "$SSH_PASSWORD" "$SUDO_PASSWORD"
+    #     done
+    #     exec 3<&-
+    # else
+    #     HOST_DETAILS=$(grep "^$SELECTED_HOST," hosts.txt)
+    #     REMOTE_USERNAME=$(echo "$HOST_DETAILS" | cut -d ',' -f 2)
+    #     KEYPATH=$(echo "$HOST_DETAILS" | cut -d ',' -f 3)
+    #     SSH_PASSWORD=$(echo "$HOST_DETAILS" | cut -d ',' -f 4)
+    #     SUDO_PASSWORD=$(echo "$HOST_DETAILS" | cut -d ',' -f 5)
 
-        prompt_restart_vdi "$SELECTED_HOST" "$REMOTE_USERNAME" "$KEYPATH" "$SSH_PASSWORD" "$SUDO_PASSWORD"
-    fi
+    #     prompt_restart_vdi "$SELECTED_HOST" "$REMOTE_USERNAME" "$KEYPATH" "$SSH_PASSWORD" "$SUDO_PASSWORD"
+    # fi
 
     # Cleanup
     rm -f modify_vdi.sh
@@ -605,7 +681,8 @@ main_menu() {
             "3" "Modify" \
             "4" "Add/Remove Hosts" \
             "5" "Shutdown/Restart Hosts" \
-            "6" "Exit" \
+            "6" "Lockdown Systems" \
+            "7" "Exit" \
             2>&1 >/dev/tty)
 
         case $OPTION in
@@ -625,6 +702,9 @@ main_menu() {
                 manage_power
                 ;;
             6)
+                lockdown_mode
+                ;;
+            7)
                 dialog --title "Exit" --msgbox "Exiting system. Goodbye!" 6 40
                 clear
                 exit 0
