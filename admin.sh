@@ -454,6 +454,9 @@ title = $VDI_TITLE
 theme = $VDI_THEME
 [Authentication]
 auth_backend = $VDI_AUTH
+auth_totp = false
+tls_verify = false
+
 [Hosts]
 $PROXMOX_IP=8006
 EOL
@@ -594,15 +597,15 @@ install_vdi_client() {
         fi
     done
 
-    dialog --title "Install VDI Client" --inputbox "Enter your Network Adapter (e.g., eth0, enp1s0):" 8 40 2>network_adapter.txt
+    #dialog --title "Install VDI Client" --inputbox "Enter your Network Adapter (e.g., eth0, enp1s0):" 8 40 2>network_adapter.txt
 
     PROXMOX_IP=$(<proxmox_ip.txt)
     VDI_TITLE=$(<vdi_title.txt)
-    NETWORK_ADAPTER=$(<network_adapter.txt)
-    rm -f proxmox_ip.txt vdi_title.txt network_adapter.txt
+    #NETWORK_ADAPTER=$(<network_adapter.txt)
+    rm -f proxmox_ip.txt vdi_title.txt 
 
     # Confirm the collected variables
-    dialog --title "Confirm Installation Variables" --msgbox "Proxmox IP: $PROXMOX_IP\nThin Client Title: $VDI_TITLE\nAuth Type: $VDI_AUTH\nNetwork Adapter: $NETWORK_ADAPTER" 10 50
+    dialog --title "Confirm Installation Variables" --msgbox "Proxmox IP: $PROXMOX_IP\nThin Client Title: $VDI_TITLE\nAuth Type: $VDI_AUTH" 10 50
 
     # Clone and prepare the repo locally
     TEMP_DIR="/tmp/simpledebianvdi"
@@ -619,7 +622,7 @@ install_vdi_client() {
     # fi
 
     # Define commands
-    INSTALL_COMMAND="sudo git clone -b $BRANCH $REPO_URL && cd simpledebianvdi && sudo chmod +x simple_setup.sh && sudo ./simple_setup.sh -i $PROXMOX_IP -t '$VDI_TITLE' -a $VDI_AUTH -n $NETWORK_ADAPTER"
+    INSTALL_COMMAND="sudo git clone -b $BRANCH $REPO_URL && cd simpledebianvdi && sudo chmod +x simple_setup.sh && sudo ./simple_setup.sh -i $PROXMOX_IP -t '$VDI_TITLE' -a $VDI_AUTH "
     AUTOSTART_COMMAND="sudo mkdir -p /home/vdiuser/.config/lxsession/LXDE && echo '@/usr/bin/bash /home/vdiuser/thinclient' | sudo tee /home/vdiuser/.config/lxsession/LXDE/autostart"
     REBOOT_COMMAND="sudo reboot"
 
