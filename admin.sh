@@ -498,9 +498,12 @@ EOF
         if [[ -z "$KEYPATH" ]]; then
             sshpass -p "$SSH_PASSWORD" scp ./modify_vdi.sh $REMOTE_USERNAME@$SELECTED_HOST:~/
             sshpass -p "$SSH_PASSWORD" ssh $REMOTE_USERNAME@$SELECTED_HOST "chmod +x modify_vdi.sh && echo \"$SUDO_PASSWORD\" | sudo -S ./modify_vdi.sh && rm -f modify_vdi.sh"
+            sshpass -p "$SSH_PASSWORD" ssh $REMOTE_USERNAME@$SELECTED_HOST "pkill python"
         else
             scp -i "$KEYPATH" ./modify_vdi.sh $REMOTE_USERNAME@$SELECTED_HOST:~/
             ssh -i "$KEYPATH" $REMOTE_USERNAME@$SELECTED_HOST "chmod +x modify_vdi.sh && echo \"$SUDO_PASSWORD\" | sudo -S ./modify_vdi.sh && rm -f modify_vdi.sh"
+            ssh -i "$KEYPATH" $REMOTE_USERNAME@$SELECTED_HOST "pkill zenity"
+            
         fi
 
         dialog --title "Success" --msgbox "Configuration applied to $SELECTED_HOST!" 6 40
